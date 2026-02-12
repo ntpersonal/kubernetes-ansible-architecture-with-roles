@@ -1,0 +1,67 @@
+---
+- name: Create monitoring namespace
+  become_user: ubuntu
+  shell: kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+- name: Copy Prometheus RBAC and ConfigMap
+  become_user: ubuntu
+  template:
+    src: prometheus-config.yml.j2
+    dest: /tmp/prometheus-config.yml
+
+- name: Apply Prometheus RBAC and ConfigMap
+  become_user: ubuntu
+  shell: kubectl apply -f /tmp/prometheus-config.yml
+
+- name: Copy Prometheus Deployment
+  become_user: ubuntu
+  template:
+    src: prometheus-deployment.yml.j2
+    dest: /tmp/prometheus-deployment.yml
+
+- name: Apply Prometheus Deployment
+  become_user: ubuntu
+  shell: kubectl apply -f /tmp/prometheus-deployment.yml
+
+- name: Copy Grafana Deployment
+  become_user: ubuntu
+  template:
+    src: grafana-deployment.yml.j2
+    dest: /tmp/grafana-deployment.yml
+
+- name: Apply Grafana Deployment
+  become_user: ubuntu
+  shell: kubectl apply -f /tmp/grafana-deployment.yml
+
+- name: Wait for Prometheus to be ready
+  become_user: ubuntu
+  shell: kubectl wait --for=condition=ready pod -l app=prometheus -n monitoring --timeout=300s
+  retries: 3
+  delay: 10
+  register: prometheus_ready
+  until: prometheus_ready.rc == 0
+
+- name: Wait for Grafana to be ready
+  become_user: ubuntu
+  shell: kubectl wait --for=condition=ready pod -l app=grafana -n monitoring --timeout=300s
+  retries: 3
+  delay: 10
+  register: grafana_ready
+  until: grafana_ready.rc == 0
+
+- name: Get NodePort services
+  become_user: ubuntu
+  shell: kubectl get svc -n monitoring
+  register: monitoring_services
+
+- name: Display monitoring access info
+  debug:
+    msg:
+      - "==============================================="
+      - "Kubernetes In-Cluster Monitoring Deployed!"
+      - "==============================================="
+      - "Prometheus: http://{{ ansible_host }}:{{ prometheus_nodeport }}"
+      - "Grafana:    http://{{ ansible_host }}:{{ grafana_nodeport }}"
+      - "Grafana credentials: admin / {{ grafana_admin_password }}"
+      - "==============================================="
+      - "{{ monitoring_services.stdout }}"
