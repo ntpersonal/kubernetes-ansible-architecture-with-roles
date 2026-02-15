@@ -13,6 +13,16 @@
   become_user: ubuntu
   shell: kubectl apply -f /tmp/prometheus-config.yml
 
+- name: Copy Prometheus Alert Rules
+  become_user: ubuntu
+  template:
+    src: prometheus-rules.yml.j2
+    dest: /tmp/prometheus-rules.yml
+
+- name: Apply Prometheus Alert Rules
+  become_user: ubuntu
+  shell: kubectl apply -f /tmp/prometheus-rules.yml
+
 - name: Copy Prometheus Deployment
   become_user: ubuntu
   template:
