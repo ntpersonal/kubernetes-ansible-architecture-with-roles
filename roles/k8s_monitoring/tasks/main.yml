@@ -1,50 +1,72 @@
 ---
 - name: Create monitoring namespace
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
 - name: Copy Prometheus RBAC and ConfigMap
+  become: yes
   become_user: ubuntu
   template:
     src: prometheus-config.yml.j2
     dest: /tmp/prometheus-config.yml
 
 - name: Apply Prometheus RBAC and ConfigMap
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl apply -f /tmp/prometheus-config.yml
 
 - name: Copy Prometheus Alert Rules
+  become: yes
   become_user: ubuntu
   template:
     src: prometheus-rules.yml.j2
     dest: /tmp/prometheus-rules.yml
 
 - name: Apply Prometheus Alert Rules
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl apply -f /tmp/prometheus-rules.yml
 
 - name: Copy Prometheus Deployment
+  become: yes
   become_user: ubuntu
   template:
     src: prometheus-deployment.yml.j2
     dest: /tmp/prometheus-deployment.yml
 
 - name: Apply Prometheus Deployment
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl apply -f /tmp/prometheus-deployment.yml
 
 - name: Copy Grafana Deployment
+  become: yes
   become_user: ubuntu
   template:
     src: grafana-deployment.yml.j2
     dest: /tmp/grafana-deployment.yml
 
 - name: Apply Grafana Deployment
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl apply -f /tmp/grafana-deployment.yml
 
 - name: Wait for Prometheus to be ready
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl wait --for=condition=ready pod -l app=prometheus -n monitoring --timeout=300s
   retries: 3
   delay: 10
@@ -52,7 +74,10 @@
   until: prometheus_ready.rc == 0
 
 - name: Wait for Grafana to be ready
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl wait --for=condition=ready pod -l app=grafana -n monitoring --timeout=300s
   retries: 3
   delay: 10
@@ -60,7 +85,10 @@
   until: grafana_ready.rc == 0
 
 - name: Get NodePort services
+  become: yes
   become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
   shell: kubectl get svc -n monitoring
   register: monitoring_services
 
