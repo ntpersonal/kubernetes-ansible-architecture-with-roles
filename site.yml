@@ -1,21 +1,7 @@
 ---
-- name: Common Kubernetes Setup
-  hosts: k8s_cluster
-  become: yes
-  roles:
-    - common
-
-- name: Setup Kubernetes Master
-  hosts: masters
-  become: yes
-  roles:
-    - kubernetes_master
-
-- name: Setup Kubernetes Workers
-  hosts: workers
-  become: yes
-  roles:
-    - kubernetes_worker
+# NOTE: common, kubernetes_master and kubernetes_worker roles are called
+# directly by Heat runcmd during bootstrap. Ansible is only responsible
+# for monitoring deployment after the cluster is ready.
 
 - name: Setup Node Exporter on ALL nodes (host-level metrics)
   hosts: k8s_cluster
@@ -28,20 +14,22 @@
         create_home: no
         system: yes
 
+    - name: Check if node_exporter already installed
+      stat:
+        path: /usr/local/bin/node_exporter
+      register: node_exporter_binary
+
     - name: Download Node Exporter with curl
       shell: |
         curl -L --retry 3 --retry-delay 5 \
           "https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz" \
           -o /tmp/node_exporter.tar.gz
-        # Verify it's a valid gzip file
         file /tmp/node_exporter.tar.gz | grep -q "gzip" || exit 1
-      args:
-        creates: /tmp/node_exporter.tar.gz
+      when: not node_exporter_binary.stat.exists
 
     - name: Extract Node Exporter
       shell: tar -xzf /tmp/node_exporter.tar.gz -C /tmp/
-      args:
-        creates: /tmp/node_exporter-1.7.0.linux-amd64/node_exporter
+      when: not node_exporter_binary.stat.exists
 
     - name: Install Node Exporter binary
       copy:
@@ -51,6 +39,7 @@
         owner: node_exporter
         group: node_exporter
         remote_src: yes
+      when: not node_exporter_binary.stat.exists
 
     - name: Create Node Exporter systemd service
       copy:
