@@ -103,3 +103,56 @@
       - "Grafana credentials: admin / {{ grafana_admin_password }}"
       - "==============================================="
       - "{{ monitoring_services.stdout }}"
+- name: Copy AI Predictor RBAC
+  become: yes
+  become_user: ubuntu
+  template:
+    src: ai-predictor/ai-rbac.yml.j2
+    dest: /tmp/ai-rbac.yml
+
+- name: Apply AI Predictor RBAC
+  become: yes
+  become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+  shell: kubectl apply -f /tmp/ai-rbac.yml
+
+- name: Copy AI Predictor ConfigMap
+  become: yes
+  become_user: ubuntu
+  template:
+    src: ai-predictor/ai-predictor-config.yml.j2
+    dest: /tmp/ai-predictor-config.yml
+
+- name: Apply AI Predictor ConfigMap
+  become: yes
+  become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+  shell: kubectl apply -f /tmp/ai-predictor-config.yml
+
+- name: Copy AI Predictor Deployment
+  become: yes
+  become_user: ubuntu
+  template:
+    src: ai-predictor/ai-predictor-deployment.yml.j2
+    dest: /tmp/ai-predictor-deployment.yml
+
+- name: Apply AI Predictor Deployment
+  become: yes
+  become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+  shell: kubectl apply -f /tmp/ai-predictor-deployment.yml
+
+- name: Wait for AI Predictor to be ready
+  become: yes
+  become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+  shell: kubectl wait --for=condition=ready pod -l app=ai-predictor -n default --timeout=300s
+  retries: 3
+  delay: 10
+  register: ai_ready
+  until: ai_ready.rc == 0
+  ignore_errors: yes

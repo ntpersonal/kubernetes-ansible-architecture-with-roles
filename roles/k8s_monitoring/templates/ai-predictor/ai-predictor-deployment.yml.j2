@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-load-predictor
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-predictor
+  template:
+    metadata:
+      labels:
+        app: ai-predictor
+    spec:
+      serviceAccountName: ai-predictor
+      containers:
+      - name: predictor
+        image: python:3.11-slim
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            pip install --quiet requests
+            python3 -u /scripts/predictor.py
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
+      volumes:
+      - name: script
+        configMap:
+          name: ai-load-predictor

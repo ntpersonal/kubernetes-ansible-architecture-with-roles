@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-load-predictor
+  namespace: default
+data:
+  predictor.py: |
+    #!/usr/bin/env python3
+    import requests
+    import time
+    from datetime import datetime
+    import sys
+    
+    sys.stdout = sys.__stdout__
+    
+    HPA_CPU_THRESHOLD = 50
+    CPU_REQUEST_PER_POD = 0.2
+    
+    def get_service_account_token():
+        with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as f:
+            return f.read().strip()
+    
+    def get_current_load():
+        try:
+            token = get_service_account_token()
+            headers = {'Authorization': f'Bearer {token}'}
+            url = "https://kubernetes.default.svc.cluster.local/apis/metrics.k8s.io/v1beta1/namespaces/default/pods"
+            
+            response = requests.get(url, headers=headers, verify='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt', timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                total_cpu = 0
+                pod_count = 0
+                
+                for item in data.get('items', []):
+                    pod_name = item['metadata']['name']
+                    if 'php-apache' in pod_name:
+                        for container in item.get('containers', []):
+                            cpu_str = container['usage']['cpu']
+                            if cpu_str.endswith('n'):
+                                cpu_cores = float(cpu_str[:-1]) / 1000000000
+                            elif cpu_str.endswith('m'):
+                                cpu_cores = float(cpu_str[:-1]) / 1000
+                            else:
+                                cpu_cores = float(cpu_str)
+                            
+                            total_cpu += cpu_cores
+                            pod_count += 1
+                
+                return total_cpu, pod_count
+                
+        except Exception as e:
+            print(f"Error querying metrics: {e}", flush=True)
+        return 0.0, 0
+    
+    def predict_next_load(current_load, hour):
+        if hour in [10, 15]:
+            predicted = current_load * 5.0
+            confidence = 0.85
+            reason = "Historical peak hour (10 AM/3 PM)"
+        elif hour in [9, 14, 16]:
+            predicted = current_load * 2.0
+            confidence = 0.70
+            reason = "Pre-peak hour pattern"
+        else:
+            predicted = current_load * 1.2
+            confidence = 0.60
+            reason = "Normal activity with growth trend"
+        
+        return predicted, confidence, reason
+    
+    def get_current_replicas():
+        try:
+            token = get_service_account_token()
+            headers = {'Authorization': f'Bearer {token}'}
+            url = "https://kubernetes.default.svc.cluster.local/apis/apps/v1/namespaces/default/deployments/php-apache"
+            response = requests.get(url, headers=headers, verify='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt', timeout=5)
+            
+            if response.status_code == 200:
+                return response.json()['spec']['replicas']
+        except:
+            pass
+        return 1
+    
+    def analyze_capacity(current_load, predicted_load, current_replicas):
+        current_capacity = current_replicas * CPU_REQUEST_PER_POD
+        current_utilization_pct = (current_load / current_capacity * 100) if current_capacity > 0 else 0
+        predicted_utilization_pct = (predicted_load / current_capacity * 100) if current_capacity > 0 else 0
+        
+        if predicted_load > 0:
+            recommended_replicas = int((predicted_load / CPU_REQUEST_PER_POD) / 0.4) + 1
+            recommended_replicas = max(1, min(10, recommended_replicas))
+        else:
+            recommended_replicas = 1
+        
+        return {
+            'current_utilization': current_utilization_pct,
+            'predicted_utilization': predicted_utilization_pct,
+            'recommended_replicas': recommended_replicas,
+            'current_capacity': current_capacity
+        }
+    
+    def main():
+        print("=" * 70, flush=True)
+        print("🤖 AI LOAD PREDICTOR - Smart Capacity Planning", flush=True)
+        print(f"   HPA Threshold: {HPA_CPU_THRESHOLD}% CPU", flush=True)
+        print(f"   CPU per Pod: {CPU_REQUEST_PER_POD} cores", flush=True)
+        print("=" * 70, flush=True)
+        print("", flush=True)
+        
+        iteration = 0
+        
+        while True:
+            try:
+                iteration += 1
+                now = datetime.now()
+                hour = now.hour
+                
+                print(f"\n{'='*70}", flush=True)
+                print(f"📊 PREDICTION CYCLE #{iteration} - {now.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+                print(f"{'='*70}", flush=True)
+                
+                current_load, pod_count = get_current_load()
+                current_replicas = get_current_replicas()
+                predicted_load, confidence, reason = predict_next_load(current_load, hour)
+                analysis = analyze_capacity(current_load, predicted_load, current_replicas)
+                
+                print(f"⏰ Current Time: {now.strftime('%H:%M')} (Hour: {hour})", flush=True)
+                print(f"📈 Current Load: {current_load:.4f} cores ({pod_count} containers)", flush=True)
+                print(f"🔮 Predicted Load: {predicted_load:.4f} cores", flush=True)
+                print(f"🎯 Confidence: {confidence*100:.0f}%", flush=True)
+                print(f"💡 Reason: {reason}", flush=True)
+                print(f"", flush=True)
+                print(f"📦 Current Replicas: {current_replicas}", flush=True)
+                print(f"📊 Current Utilization: {analysis['current_utilization']:.1f}% of capacity", flush=True)
+                print(f"🔮 Predicted Utilization: {analysis['predicted_utilization']:.1f}% of capacity", flush=True)
+                print(f"🎯 AI Recommended Replicas: {analysis['recommended_replicas']}", flush=True)
+                print(f"", flush=True)
+                
+                if analysis['predicted_utilization'] > HPA_CPU_THRESHOLD:
+                    change = analysis['recommended_replicas'] - current_replicas
+                    print(f"⚠️  🚨 AI ALERT: CAPACITY WILL BE EXCEEDED!", flush=True)
+                    print(f"   Predicted: {analysis['predicted_utilization']:.1f}% (exceeds {HPA_CPU_THRESHOLD}% threshold)", flush=True)
+                    print(f"   Current: {current_replicas} replicas → Recommended: {analysis['recommended_replicas']} replicas", flush=True)
+                    if change > 0:
+                        print(f"   🚀 ACTION: Scale UP by {change} replicas NOW (proactively!)", flush=True)
+                    
+                elif analysis['predicted_utilization'] < 30 and current_replicas > 1:
+                    change = current_replicas - analysis['recommended_replicas']
+                    print(f"✅ AI INSIGHT: Under-utilized capacity", flush=True)
+                    print(f"   Predicted: {analysis['predicted_utilization']:.1f}% (well below {HPA_CPU_THRESHOLD}% threshold)", flush=True)
+                    print(f"   💡 RECOMMENDATION: Can scale DOWN by {change} replicas to save resources", flush=True)
+                    
+                elif analysis['current_utilization'] > HPA_CPU_THRESHOLD:
+                    print(f"⚠️  CURRENT OVERLOAD: {analysis['current_utilization']:.1f}% CPU", flush=True)
+                    print(f"   HPA should be scaling now...", flush=True)
+                    
+                else:
+                    print(f"✓  CAPACITY IS OPTIMAL", flush=True)
+                    print(f"   Current: {analysis['current_utilization']:.1f}% | Predicted: {analysis['predicted_utilization']:.1f}%", flush=True)
+                    print(f"   Both within safe range (< {HPA_CPU_THRESHOLD}%)", flush=True)
+                
+            except Exception as e:
+                print(f"❌ Error: {e}", flush=True)
+            
+            time.sleep(30)
+    
+    if _name_ == "_main_":
+        main()
