@@ -17,6 +17,9 @@ spec:
         app: prometheus
     spec:
       serviceAccountName: prometheus
+      # FIX 1: Pin Prometheus to master node
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
       containers:
       - name: prometheus
         image: prom/prometheus:v2.45.0
@@ -31,7 +34,12 @@ spec:
           name: web
         volumeMounts:
         - name: prometheus-config
-          mountPath: /etc/prometheus
+          mountPath: /etc/prometheus/prometheus.yml
+          subPath: prometheus.yml
+        # FIX 2: Mount prometheus-rules ConfigMap
+        - name: prometheus-rules
+          mountPath: /etc/prometheus/alert-rules.yml
+          subPath: alert-rules.yml
         - name: prometheus-storage
           mountPath: /prometheus
         resources:
@@ -45,6 +53,10 @@ spec:
       - name: prometheus-config
         configMap:
           name: prometheus-config
+      # FIX 3: Add prometheus-rules volume
+      - name: prometheus-rules
+        configMap:
+          name: prometheus-rules
       - name: prometheus-storage
         emptyDir: {}
 ---
